@@ -23,14 +23,17 @@ serverapp = "fedjam_flower.server_app:app"
 clientapp = "fedjam_flower.client_app:app"
 
 [tool.flwr.app.config]
-num-server-rounds = 6
-fraction-fit = 0.5
+num-server-rounds = 50
+fraction-fit = 1
 local-epochs = 1
+model_name = "resnet18"
+learning-rate-max = 5e-5
+learning-rate-min = 1e-6
 
 [tool.flwr.federations]
 default = "local-simulation"
 
 [tool.flwr.federations.local-simulation]
-options.num-supernodes = 6
-options.backend.client-resources.num-cpus = 12
+options.num-supernodes = 50
+options.backend.client-resources.num-cpus = 24
 options.backend.client-resources.num-gpus = 0.5

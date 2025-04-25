@@ -5,6 +5,7 @@ __pycache__/
 
 # Flower directory
 .flwr
+runs/
 
 # C extensions
 *.so
