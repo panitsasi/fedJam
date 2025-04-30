@@ -20,10 +20,11 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 def get_evaluate_fn(context: Context):
     model_name = context.run_config["model_name"]
+    num_clients = context.run_config["num_clients"]
     
     # Use timestamp to distinguish different runs
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    log_dir = os.path.join("runs", model_name, f"{timestamp}")
+    log_dir = os.path.join("runs/dataset_v2", f"{model_name}_clients_{num_clients}", f"{timestamp}")
     writer = SummaryWriter(log_dir)
 
     def evaluate(server_round: int, parameters, config):
@@ -51,7 +52,6 @@ def server_fn(context: Context):
     # Read from config
     num_rounds = context.run_config["num-server-rounds"]
     fraction_fit = context.run_config["fraction-fit"]
-    print(f"Context: {context}")
     model = get_model(context.run_config["model_name"])
     ndarrays = get_weights(model)
     parameters = ndarrays_to_parameters(ndarrays)

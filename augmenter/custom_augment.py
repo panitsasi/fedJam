@@ -19,6 +19,9 @@ class CustomAugmenter:
         self.cutout_fill = cutout_fill
 
     def __call__(self, img):
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+
         if random.random() < 0.5:
             img = ImageEnhance.Brightness(img).enhance(random.uniform(0.8, 1.5))
         if random.random() < 0.5:

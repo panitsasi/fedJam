@@ -23,7 +23,7 @@ def load_data(partition_id: int, num_partitions: int):
     print(f"Loading dataset {partition_id} / {num_partitions}", flush=True)
     global dataset_dict
     if dataset_dict is None:
-        dataset_dict = load_dataset("imagefolder", data_dir="/home/iofeidis/workspace/spectrograms_old/spectro_flower_format")
+        dataset_dict = load_dataset("imagefolder", data_dir="/home/ioannis/Desktop/spectrograms/spectro_flower_format_v2")
     
     train_dataset = dataset_dict["train"]
     test_dataset = dataset_dict["test"]
