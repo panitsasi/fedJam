@@ -57,7 +57,8 @@ def client_fn(context: Context):
     model = get_model(context.run_config["model_name"])
     partition_id = context.node_config["partition-id"]
     num_partitions = context.node_config["num-partitions"]
-    trainloader, valloader = load_data(partition_id, num_partitions)
+    data_dir = context.run_config["data_dir"]
+    trainloader, valloader = load_data(partition_id, num_partitions, data_dir=data_dir)
     local_epochs = context.run_config["local-epochs"]
 
     # Return Client instance

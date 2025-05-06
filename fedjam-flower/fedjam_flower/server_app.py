@@ -21,17 +21,22 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 def get_evaluate_fn(context: Context):
     model_name = context.run_config["model_name"]
     num_clients = context.run_config["num_clients"]
+    fft = context.run_config["fft"]
+    data_dir = context.run_config["data_dir"]
     
     # Use timestamp to distinguish different runs
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    log_dir = os.path.join("runs/dataset_v2", f"{model_name}_clients_{num_clients}", f"{timestamp}")
+    if fft is not None:
+        log_dir = os.path.join("runs/dataset_v2", f"{model_name}_clients_{num_clients}_fft_{fft}", f"{timestamp}")
+    else:
+        log_dir = os.path.join("runs/dataset_v2", f"{model_name}_clients_{num_clients}", f"{timestamp}")
     writer = SummaryWriter(log_dir)
 
     def evaluate(server_round: int, parameters, config):
         if server_round != 0:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             model = get_model(model_name).to(device).eval()
-            _, testloader = load_data(0, 1)
+            _, testloader = load_data(0, 1, data_dir=data_dir)
             set_weights(model, parameters)
             loss, accuracy = test(model, testloader, device)
             print(f"Server-side evaluation loss {loss} / accuracy {accuracy}")

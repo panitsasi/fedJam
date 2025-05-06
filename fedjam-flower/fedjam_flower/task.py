@@ -18,12 +18,12 @@ dataset_dict = None  # Cache FederatedDataset
 
 
 
-def load_data(partition_id: int, num_partitions: int):
+def load_data(partition_id: int, num_partitions: int, data_dir: str = None):
     # Only initialize `FederatedDataset` once
     print(f"Loading dataset {partition_id} / {num_partitions}", flush=True)
     global dataset_dict
     if dataset_dict is None:
-        dataset_dict = load_dataset("imagefolder", data_dir="/home/ioannis/Desktop/spectrograms/spectro_flower_format_v2")
+        dataset_dict = load_dataset("imagefolder", data_dir=data_dir)
     
     train_dataset = dataset_dict["train"]
     test_dataset = dataset_dict["test"]
