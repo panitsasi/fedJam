@@ -10,6 +10,11 @@ import sys
 import timm
 import torch.nn as nn
 
+from transformers import ViTForImageClassification, ViTImageProcessor
+from peft import (
+    LoraConfig,
+    get_peft_model
+)
 
 def cosine_annealing(
     current_round: int,
@@ -22,9 +27,32 @@ def cosine_annealing(
     return lrate_min + 0.5 * (lrate_max - lrate_min) * (1 + math.cos(cos_inner))
 
 
-def get_model(model_name: str) -> nn.Module:
+def get_model(model_name: str, is_lora: bool, is_timm: bool) -> nn.Module:
     # Initialize model parameters
-    model = timm.create_model(model_name, pretrained=True, num_classes=4)
+    if is_timm:
+        # Use timm model
+        model = timm.create_model(model_name, pretrained=True, num_classes=4)
+    else:
+        # Use Hugging Face model
+        model = ViTForImageClassification.from_pretrained(
+            model_name,
+            num_labels=4,
+            ignore_mismatched_sizes=True,
+        )
+
+    if is_lora:
+        lora_config = LoraConfig(
+            r=32,
+            lora_alpha=64,
+            target_modules=["query", "value", "projection"], # Targeting query, value, and the output projection
+            lora_dropout=0.15,
+            bias="none",
+        )
+
+        model = get_peft_model(model, lora_config)
+        model.print_trainable_parameters()
+        print(f"Created LoRA model", flush=True)
+
     return model
 
 

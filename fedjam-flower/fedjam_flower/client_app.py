@@ -22,43 +22,63 @@ class FlowerClient(NumPyClient):
         print(f"Using device: {self.device}")
         self.model.to(self.device)
         self.context = context
+        self.is_lora = context["is_lora"]
+        self.num_server_rounds = context["num-server-rounds"]
+        self.is_timm = context["is_timm"]
+        self.is_warmup = context["is_warmup"]
 
     def fit(self, parameters, config):
-        set_weights(self.model, parameters)
+        set_weights(self.model, parameters, is_lora=self.is_lora)
+        current_round = int(config["current_round"])
 
-        # new_lr = cosine_annealing(
-        #     int(config["current_round"]),
-        #     self.context["num-server-rounds"],
-        #     self.context["learning-rate-max"],
-        #     self.context["learning-rate-min"],
-        # )
+        new_lr = cosine_annealing(
+            current_round,
+            self.context["num-server-rounds"],
+            self.context["learning-rate-max"],
+            self.context["learning-rate-min"],
+        )
+
+        # (Warmup) Stage 1: Head-only training for first N rounds
+        if self.is_warmup:
+            if current_round <= 0.1 * self.num_server_rounds:
+                for param in self.model.parameters():
+                    param.requires_grad = False
+                for param in self.model.classifier.parameters():
+                    param.requires_grad = True
+            else:
+                for param in self.model.parameters():
+                    param.requires_grad = True
 
         train_loss = train(
             self.model,
             self.trainloader,
             self.local_epochs,
             self.device,
-            # learning_rate=new_lr,
+            lr=new_lr,
+            is_lora=self.is_lora,
+            is_timm=self.is_timm,
         )
         return (
-            get_weights(self.model),
+            get_weights(self.model, is_lora=self.is_lora),
             len(self.trainloader.dataset),
             {"train_loss": train_loss},
         )
 
     def evaluate(self, parameters, config):
-        set_weights(self.model, parameters)
-        loss, accuracy = test(self.model, self.valloader, self.device)
+        set_weights(self.model, parameters, is_lora=self.is_lora)
+        loss, accuracy = test(self.model, self.valloader, self.device, is_lora=self.is_lora, is_timm=self.is_timm)
         return loss, len(self.valloader.dataset), {"accuracy": accuracy}
 
 
 def client_fn(context: Context):
     # Load model and data
-    model = get_model(context.run_config["model_name"])
+    model = get_model(context.run_config["model_name"], context.run_config["is_lora"], context.run_config["is_timm"])
     partition_id = context.node_config["partition-id"]
     num_partitions = context.node_config["num-partitions"]
     data_dir = context.run_config["data_dir"]
-    trainloader, valloader = load_data(partition_id, num_partitions, data_dir=data_dir)
+    batch_size = context.run_config["batch_size"]
+    trainloader, valloader = load_data(partition_id, num_partitions,
+                                       data_dir=data_dir, batch_size=batch_size)
     local_epochs = context.run_config["local-epochs"]
 
     # Return Client instance
