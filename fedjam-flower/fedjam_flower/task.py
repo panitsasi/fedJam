@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from flwr_datasets import FederatedDataset
-from flwr_datasets.partitioner import IidPartitioner
+from flwr_datasets.partitioner import IidPartitioner, PathologicalPartitioner
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
@@ -35,8 +35,13 @@ def load_data(partition_id: int, num_partitions: int, data_dir: str = None,
     train_dataset = dataset_dict["train"]
     test_dataset = dataset_dict["test"]
 
-    partitioner1 = IidPartitioner(num_partitions=num_partitions)
-    partitioner2 = IidPartitioner(num_partitions=num_partitions)
+    # Using PathologicalPartitioner to specify number of classes per partition (IID)
+    partitioner1 = PathologicalPartitioner(
+        num_partitions=num_partitions, partition_by="label", num_classes_per_partition=4
+    )
+    partitioner2 = PathologicalPartitioner(
+        num_partitions=num_partitions, partition_by="label", num_classes_per_partition=4
+    )
     partitioner1.dataset = train_dataset
     train_partition = partitioner1.load_partition(partition_id)
 
