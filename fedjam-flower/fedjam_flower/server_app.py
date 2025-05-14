@@ -3,7 +3,10 @@
 from flwr.common import Context, ndarrays_to_parameters
 from flwr.server import ServerApp, ServerAppComponents, ServerConfig
 from flwr.server.strategy import FedAvg
-from fedjam_flower.task import get_weights, set_weights, load_data, test
+from fedjam_flower.task import (
+    get_weights, set_weights, load_data,
+    test, set_seed
+)
 
 import timm
 import torch
@@ -23,6 +26,7 @@ def get_evaluate_fn(context: Context):
     model_name = context.run_config["model_name"]
     num_clients = context.run_config["num_clients"]
     fft = context.run_config["fft"]
+    gain = context.run_config["gain"]
     data_dir = context.run_config["data_dir"]
     batch_size = context.run_config["batch_size"]
     is_lora = context.run_config["is_lora"]
@@ -34,7 +38,8 @@ def get_evaluate_fn(context: Context):
     filename = f"runs/{dataset_version}/{model_name}_clients_{num_clients}"
     if fft != 0:
         filename += f"_fft_{fft}"
-    # TODO: do the same for gain
+    if gain != 0:
+        filename += f"_gain_{gain}"
     if is_lora:
         filename += "_lora"
     log_dir = os.path.join(filename, f"{timestamp}")
@@ -90,6 +95,9 @@ def server_fn(context: Context):
     ndarrays = get_weights(model, is_lora=is_lora)
     parameters = ndarrays_to_parameters(ndarrays)
     evaluate = get_evaluate_fn(context)
+
+    # Set seed for reproducibility
+    set_seed(context.run_config["random_seed"])
 
     # Define strategy
     strategy = FedAvg(

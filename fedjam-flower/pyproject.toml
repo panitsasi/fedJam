@@ -23,25 +23,27 @@ serverapp = "fedjam_flower.server_app:app"
 clientapp = "fedjam_flower.client_app:app"
 
 [tool.flwr.app.config]
-num-server-rounds = 50
+num-server-rounds = 2
 fraction-fit = 1
 local-epochs = 1
 model_name = "google/vit-base-patch16-224-in21k"
-learning-rate-max = 1e-5
+learning-rate-max = 5e-4
 learning-rate-min = 1e-6
 batch_size = 128
-dataset_version = "dataset_v3"
-data_dir = "/home/ioannis/Desktop/spectrograms/dataset_v3/spectro_flower_all"
+dataset_version = "test"
+data_dir = "/home/ioannis/Desktop/spectrograms/dataset_v3/spectro_flower_gain"
 fft = 0
-num_clients = 10
+gain = 20
+num_clients = 2
 is_lora = false
 is_timm = false
-is_warmup = true
+is_warmup = false
+random_seed = 42
 
 [tool.flwr.federations]
 default = "local-simulation"
 
 [tool.flwr.federations.local-simulation]
-options.num-supernodes = 10
+options.num-supernodes = 2
 options.backend.client-resources.num-cpus = 24
 options.backend.client-resources.num-gpus = 0.3

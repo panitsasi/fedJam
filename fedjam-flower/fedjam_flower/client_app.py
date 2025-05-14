@@ -4,7 +4,10 @@ import torch
 
 from flwr.client import ClientApp, NumPyClient
 from flwr.common import Context
-from fedjam_flower.task import get_weights, load_data, set_weights, test, train
+from fedjam_flower.task import (
+    get_weights, load_data, set_weights,
+    test, train, set_seed
+)
 from fedjam_flower.models import get_model, cosine_annealing
 
 import timm
@@ -19,15 +22,17 @@ class FlowerClient(NumPyClient):
         self.valloader = valloader
         self.local_epochs = local_epochs
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Using device: {self.device}")
         self.model.to(self.device)
         self.context = context
         self.is_lora = context["is_lora"]
         self.num_server_rounds = context["num-server-rounds"]
         self.is_timm = context["is_timm"]
         self.is_warmup = context["is_warmup"]
+        self.random_seed = context["random_seed"]
 
     def fit(self, parameters, config):
+        # Set seed for reproducibility
+        set_seed(self.random_seed)
         set_weights(self.model, parameters, is_lora=self.is_lora)
         current_round = int(config["current_round"])
 

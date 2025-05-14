@@ -9,6 +9,8 @@ from flwr_datasets import FederatedDataset
 from flwr_datasets.partitioner import IidPartitioner, PathologicalPartitioner
 from torch.utils.data import DataLoader
 from torchvision import transforms
+import random
+import numpy as np
 
 from datasets import load_dataset
 from fedjam_flower.custom_augment import CustomAugmenter
@@ -27,7 +29,7 @@ dataset_dict = None  # Cache FederatedDataset
 def load_data(partition_id: int, num_partitions: int, data_dir: str = None,
               batch_size: int = 128):
     # Only initialize `FederatedDataset` once
-    print(f"Loading dataset {partition_id} / {num_partitions}", flush=True)
+    print(f"Loading dataset {partition_id + 1} / {num_partitions}", flush=True)
     global dataset_dict
     if dataset_dict is None:
         dataset_dict = load_dataset("imagefolder", data_dir=data_dir)
@@ -129,3 +131,14 @@ def set_weights(model, parameters, is_lora=False):
         params_dict = zip(model.state_dict().keys(), parameters)
         state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
         model.load_state_dict(state_dict, strict=True)
+
+
+
+def set_seed(seed: int = 42):
+    """Set random seed for reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # if using GPU
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
