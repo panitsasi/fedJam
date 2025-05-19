@@ -13,6 +13,9 @@ from fedjam_flower.models import get_model, cosine_annealing
 import timm
 from torch import nn
 
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 
 # Define Flower Client and client_fn
 class FlowerClient(NumPyClient):
@@ -54,6 +57,7 @@ class FlowerClient(NumPyClient):
                 for param in self.model.parameters():
                     param.requires_grad = True
 
+        print(f"Training...", flush=True)
         train_loss = train(
             self.model,
             self.trainloader,
@@ -82,8 +86,10 @@ def client_fn(context: Context):
     num_partitions = context.node_config["num-partitions"]
     data_dir = context.run_config["data_dir"]
     batch_size = context.run_config["batch_size"]
+    classes_per_partition = context.run_config["classes_per_partition"]
     trainloader, valloader = load_data(partition_id, num_partitions,
-                                       data_dir=data_dir, batch_size=batch_size)
+                                       data_dir=data_dir, batch_size=batch_size,
+                                       classes_per_partition=classes_per_partition)
     local_epochs = context.run_config["local-epochs"]
 
     # Return Client instance

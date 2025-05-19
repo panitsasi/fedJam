@@ -42,16 +42,17 @@ def get_model(model_name: str, is_lora: bool, is_timm: bool) -> nn.Module:
 
     if is_lora:
         lora_config = LoraConfig(
-            r=32,
+            r=16,
             lora_alpha=32,
             target_modules=["query", "key", "value", "projection"], # Targeting query, value, and the output projection
-            lora_dropout=0.15,
+            lora_dropout=0.1,
             bias="none",
+            modules_to_save=["classifier"],
         )
 
         model = get_peft_model(model, lora_config)
-        model.print_trainable_parameters()
         print(f"Created LoRA model", flush=True)
+        model.print_trainable_parameters()
 
     return model
 

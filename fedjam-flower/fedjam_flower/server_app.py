@@ -32,6 +32,7 @@ def get_evaluate_fn(context: Context):
     is_lora = context.run_config["is_lora"]
     is_timm = context.run_config["is_timm"]
     dataset_version = context.run_config["dataset_version"]
+    classes_per_partition = context.run_config["classes_per_partition"]
     
     # Use timestamp to distinguish different runs
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -42,6 +43,10 @@ def get_evaluate_fn(context: Context):
         filename += f"_gain_{gain}"
     if is_lora:
         filename += "_lora"
+    if classes_per_partition != 4:
+        filename += f"_non_iid_{classes_per_partition}"
+    else:
+        filename += "_iid"
     log_dir = os.path.join(filename, f"{timestamp}")
     writer = SummaryWriter(log_dir)
 

@@ -27,7 +27,7 @@ dataset_dict = None  # Cache FederatedDataset
 
 
 def load_data(partition_id: int, num_partitions: int, data_dir: str = None,
-              batch_size: int = 128):
+              batch_size: int = 128, classes_per_partition: int = 4):
     # Only initialize `FederatedDataset` once
     print(f"Loading dataset {partition_id + 1} / {num_partitions}", flush=True)
     global dataset_dict
@@ -39,10 +39,12 @@ def load_data(partition_id: int, num_partitions: int, data_dir: str = None,
 
     # Using PathologicalPartitioner to specify number of classes per partition (IID)
     partitioner1 = PathologicalPartitioner(
-        num_partitions=num_partitions, partition_by="label", num_classes_per_partition=4
+        num_partitions=num_partitions, partition_by="label",
+        num_classes_per_partition=classes_per_partition
     )
     partitioner2 = PathologicalPartitioner(
-        num_partitions=num_partitions, partition_by="label", num_classes_per_partition=4
+        num_partitions=num_partitions, partition_by="label",
+        num_classes_per_partition=classes_per_partition
     )
     partitioner1.dataset = train_dataset
     train_partition = partitioner1.load_partition(partition_id)

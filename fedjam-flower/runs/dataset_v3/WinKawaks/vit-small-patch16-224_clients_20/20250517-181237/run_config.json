@@ -1,0 +1,18 @@
+{
+    "num-server-rounds": 50,
+    "fraction-fit": 1,
+    "local-epochs": 1,
+    "model_name": "WinKawaks/vit-small-patch16-224",
+    "learning-rate-max": 0.0005,
+    "learning-rate-min": 1e-06,
+    "batch_size": 128,
+    "dataset_version": "dataset_v3",
+    "data_dir": "/home/ioannis/Desktop/spectrograms/dataset_v3/spectro_flower_all",
+    "fft": 0,
+    "gain": 0,
+    "num_clients": 20,
+    "is_lora": false,
+    "is_timm": false,
+    "is_warmup": false,
+    "random_seed": 43
+}
