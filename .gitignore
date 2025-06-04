@@ -1,9 +1,6 @@
-pulse/
-pulse_preprocessed/
-wideband/
-wideband_preprocessed/
-data/
-single_tone/
-single_tone_preprocessed/
-benign/
-benign_preprocessed/
+spectro_flower_spectrograms/
+spectro_flower_4_channels/
+spectro_flower_5_channels/
+spectro_flower_6_channels/
+spectro_flower_7_channels/
+spectro_flower_8_channels/
