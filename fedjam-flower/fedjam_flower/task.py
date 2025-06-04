@@ -105,8 +105,6 @@ class CustomLabelPartitioner:
 
     def _create_partitions(self):
         
-        random.seed(42)
-        np.random.seed(42)
         label_to_indices = defaultdict(list)
         for idx, sample in enumerate(self.dataset):
             label = sample["label"]
