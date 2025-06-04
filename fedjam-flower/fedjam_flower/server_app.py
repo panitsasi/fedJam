@@ -1,6 +1,7 @@
 from flwr.common import Context, ndarrays_to_parameters
 from flwr.server import ServerApp, ServerAppComponents, ServerConfig
-from fedjam_flower.task import get_weights, set_weights, load_data, test
+from fedjam_flower.task import load_data
+from fedjam_flower.train_eval import test, get_weights, set_weights
 from fedjam_flower.helper_functions import set_seed
 import torch
 from fedjam_flower.models import get_model
@@ -10,7 +11,8 @@ from datetime import datetime
 import json
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
-from flwr.server.strategy import FedAvg, FedProx, FedAdam
+from flwr.server.strategy import FedAvg, FedProx
+
 
 def get_evaluate_fn(context: Context):
     model_name = context.run_config["model_name"]
@@ -49,19 +51,6 @@ def get_evaluate_fn(context: Context):
         if server_round != 0:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             model = get_model(model_name, is_lora, is_timm, channels, classes).to(device).eval()
-
-            # _, testloader = load_data(0, 1, data_dir=data_dir, batch_size=batch_size)
-
-            #Ask Iason here
-            # _, testloader = load_data(
-            #     partition_id=0,
-            #     num_partitions=1,
-            #     data_dir=data_dir,
-            #     batch_size=batch_size,
-            #     num_classes_per_partition=num_classes_per_partition,
-            #     use_multi_channel_dataset=use_multi_channel_dataset
-
-            # )
 
             _, testloader = load_data(
                 partition_id=0,
@@ -133,7 +122,6 @@ def server_fn(context: Context):
 
     else:
         raise ValueError(f"Unsupported strategy: {strategy_name}")
-
 
     config = ServerConfig(num_rounds = context.run_config["num-server-rounds"])
 

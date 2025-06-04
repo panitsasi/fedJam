@@ -18,7 +18,6 @@ MODEL_REGISTRY = {
 
 def set_seed(seed: int = 42):
     """Set global random seed for reproducibility."""
-
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)

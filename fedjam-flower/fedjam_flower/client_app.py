@@ -1,7 +1,8 @@
 import torch
 from flwr.client import ClientApp, NumPyClient
 from flwr.common import Context
-from fedjam_flower.task import get_weights, load_data, set_weights, test, train
+from fedjam_flower.task import load_data
+from fedjam_flower.train_eval import train, test, get_weights, set_weights
 from fedjam_flower.helper_functions import set_seed, cosine_annealing
 from fedjam_flower.models import get_model
 
@@ -88,8 +89,6 @@ def client_fn(context: Context):
     )
 
     local_epochs = context.run_config["local-epochs"]
-
     return FlowerClient(model, trainloader, valloader, local_epochs, context.run_config).to_client()
-
 
 app = ClientApp(client_fn)

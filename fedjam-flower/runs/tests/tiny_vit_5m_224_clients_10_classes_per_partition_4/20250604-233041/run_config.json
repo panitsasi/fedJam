@@ -1,0 +1,23 @@
+{
+    "num-server-rounds": 50,
+    "fraction-fit": 1,
+    "local-epochs": 1,
+    "strategy": "fed_avg",
+    "model_name": "tiny_vit_5m_224",
+    "learning-rate-max": 0.0002,
+    "learning-rate-min": 1e-05,
+    "batch_size": 128,
+    "dataset_version": "tests",
+    "data_dir": "/mnt/fedJam/spectro_flower_8_channels",
+    "use_multi_channel_dataset": true,
+    "channels": 8,
+    "num_classes_per_partition": 4,
+    "classes": 4,
+    "fft": 0,
+    "gain": 0,
+    "num_clients": 10,
+    "is_lora": false,
+    "is_timm": true,
+    "is_warmup": false,
+    "seed": 42
+}
