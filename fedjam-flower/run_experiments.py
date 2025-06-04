@@ -4,12 +4,12 @@ import os
 import toml
 import shutil
 import signal
-from params import param_grid
+from params.params_dense_net_all_channels import param_grid
 
 # CONFIGURATION
 BASE_TOML = "pyproject.toml"
 BACKUP_TOML = "pyproject.backup.toml"
-GPU_POOL = ["1", "2", "3"]  # List of available GPU IDs
+GPU_POOL = ["0"]  
 MAX_PARALLEL = len(GPU_POOL)
 DELAY_BETWEEN_LAUNCHES = 20  # seconds
 

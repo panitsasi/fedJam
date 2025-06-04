@@ -1,34 +1,27 @@
-"""fedjam-flower: A Flower / PyTorch app."""
-
 from collections import OrderedDict
-
+from torch.utils.data import Dataset
+import os
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from flwr_datasets import FederatedDataset
-from flwr_datasets.partitioner import IidPartitioner, PathologicalPartitioner
+from flwr_datasets.partitioner import PathologicalPartitioner
 from torch.utils.data import DataLoader
+from collections import defaultdict
 from torchvision import transforms
 import random
 import numpy as np
-
+from torch.utils.data import DataLoader, Subset
 from datasets import load_dataset
 from fedjam_flower.custom_augment import CustomAugmenter
+from peft import get_peft_model_state_dict, set_peft_model_state_dict
+from collections import Counter
 
-from peft import (
-    LoraConfig,
-    get_peft_model,
-    get_peft_model_state_dict,
-    set_peft_model_state_dict,
-)
+dataset_dict = None  
 
-dataset_dict = None  # Cache FederatedDataset
+def load_spectrogram_dataset(partition_id: int, num_partitions: int, data_dir: str = None, 
+                       batch_size: int = 128, num_classes_per_partition: int = 4):
 
-
-
-def load_data(partition_id: int, num_partitions: int, data_dir: str = None,
-              batch_size: int = 128, classes_per_partition: int = 4):
-    # Only initialize `FederatedDataset` once
+    if num_classes_per_partition == None: 
+        num_classes_per_partition = 4
+    
     print(f"Loading dataset {partition_id + 1} / {num_partitions}", flush=True)
     global dataset_dict
     if dataset_dict is None:
@@ -37,20 +30,18 @@ def load_data(partition_id: int, num_partitions: int, data_dir: str = None,
     train_dataset = dataset_dict["train"]
     test_dataset = dataset_dict["test"]
 
-    # Using PathologicalPartitioner to specify number of classes per partition (IID)
     partitioner1 = PathologicalPartitioner(
-        num_partitions=num_partitions, partition_by="label",
-        num_classes_per_partition=classes_per_partition
+        num_partitions=num_partitions, partition_by="label", num_classes_per_partition=num_classes_per_partition
     )
     partitioner2 = PathologicalPartitioner(
-        num_partitions=num_partitions, partition_by="label",
-        num_classes_per_partition=classes_per_partition
+        num_partitions=num_partitions, partition_by="label", num_classes_per_partition=num_classes_per_partition
     )
     partitioner1.dataset = train_dataset
     train_partition = partitioner1.load_partition(partition_id)
 
     partitioner2.dataset = test_dataset
     test_partition = partitioner2.load_partition(partition_id)
+
 
     pytorch_transforms = transforms.Compose([
         CustomAugmenter(),
@@ -67,6 +58,115 @@ def load_data(partition_id: int, num_partitions: int, data_dir: str = None,
     test_partition = test_partition.with_transform(apply_transforms)
     trainloader = DataLoader(train_partition, batch_size=batch_size, shuffle=True, num_workers=8)
     testloader = DataLoader(test_partition, batch_size=batch_size, num_workers=8)
+    return trainloader, testloader
+
+
+class Multi_Channel_Dataset(Dataset):
+    def __init__(self, root_dir, class_to_idx=None):
+        self.samples = []
+        self.class_to_idx = class_to_idx or self._find_classes(root_dir)
+
+        for class_name, class_idx in self.class_to_idx.items():
+            class_folder = os.path.join(root_dir, class_name)
+            for fname in os.listdir(class_folder):
+                if fname.endswith(".pt"):
+                    path = os.path.join(class_folder, fname)
+                    self.samples.append((path, class_idx))
+
+    def _find_classes(self, directory):
+        classes = sorted(entry.name for entry in os.scandir(directory) if entry.is_dir())
+        return {cls_name: idx for idx, cls_name in enumerate(classes)}
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        path, label = self.samples[idx]
+        data = torch.load(path)
+        image = data if isinstance(data, torch.Tensor) else data["image"]
+        return {"image": image, "label": label}
+
+
+
+class CustomLabelPartitioner:
+    def __init__(self, dataset, num_partitions, num_classes_per_partition=None):
+        self.dataset = dataset
+        self.num_partitions = num_partitions
+        self.num_classes_per_partition = num_classes_per_partition
+        self.partitions = self._create_partitions()
+
+    def _create_partitions(self):
+        label_to_indices = defaultdict(list)
+        for idx, sample in enumerate(self.dataset):
+            label = sample["label"]
+            label_to_indices[label].append(idx)
+
+        labels = sorted(label_to_indices.keys())
+        num_classes = len(labels)
+
+        if self.num_classes_per_partition is None or self.num_classes_per_partition >= num_classes:
+            # IID partitioning
+            all_indices = sum(label_to_indices.values(), [])
+            random.shuffle(all_indices)  # shuffle globally
+            return np.array_split(all_indices, self.num_partitions)
+
+        # non-IID partitioning
+        partitions = [[] for _ in range(self.num_partitions)]
+
+        for i in range(self.num_partitions):
+            # Pick random, non-repeating classes per client
+            assigned_classes = random.sample(labels, self.num_classes_per_partition)
+            for cls in assigned_classes:
+                cls_indices = label_to_indices[cls]
+                random.shuffle(cls_indices)
+                # Use a balanced sample from this class
+                take_n = len(cls_indices) // self.num_partitions
+                partitions[i].extend(cls_indices[:take_n])
+
+            # Optional: shuffle the final partition for the client
+            random.shuffle(partitions[i])
+
+            # Debug print
+            # print(f"[Client {i}] classes: {assigned_classes}, samples: {len(partitions[i])}")
+
+        return partitions
+
+
+    def load_partition(self, partition_id):
+        return Subset(self.dataset, self.partitions[partition_id])
+
+
+def load_spectrogram_KPI_dataset(partition_id: int, num_partitions: int, data_dir: str = None,
+              batch_size: int = 128, num_classes_per_partition=None):
+    print(f"Loading dataset {partition_id + 1} / {num_partitions}", flush=True)
+
+    train_dataset = Multi_Channel_Dataset(os.path.join(data_dir, "train"))
+    test_dataset = Multi_Channel_Dataset(os.path.join(data_dir, "test"), class_to_idx=train_dataset.class_to_idx)
+
+    train_partitioner = CustomLabelPartitioner(
+        train_dataset, num_partitions=num_partitions, num_classes_per_partition=num_classes_per_partition, 
+    )
+    test_partitioner = CustomLabelPartitioner(
+        test_dataset, num_partitions=num_partitions, num_classes_per_partition=num_classes_per_partition,
+    )
+
+    train_partition = train_partitioner.load_partition(partition_id)
+    test_partition = test_partitioner.load_partition(partition_id)
+
+    train_labels = [train_dataset[idx]["label"] for idx in train_partition.indices]
+    test_labels = [test_dataset[idx]["label"] for idx in test_partition.indices]
+
+    train_counts = Counter(train_labels)
+    test_counts = Counter(test_labels)
+
+    print(f"\n[Client {partition_id}] Class distribution:")
+    for cls in sorted(train_counts):
+        print(f"  Class {cls}: {train_counts[cls]} train / {test_counts[cls]} test samples")
+
+
+    trainloader = DataLoader(train_partition, batch_size=batch_size, shuffle=True, num_workers=8)
+    testloader = DataLoader(test_partition, batch_size=batch_size, shuffle=False, num_workers=8)
+
     return trainloader, testloader
 
 
@@ -135,12 +235,22 @@ def set_weights(model, parameters, is_lora=False):
         model.load_state_dict(state_dict, strict=True)
 
 
-
-def set_seed(seed: int = 42):
-    """Set random seed for reproducibility."""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)  # if using GPU
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+def load_data(partition_id: int, num_partitions: int, data_dir: str = None,
+              batch_size: int = 128, num_classes_per_partition=None, use_multi_channel_dataset: bool = True):
+    
+    if use_multi_channel_dataset:
+        return load_spectrogram_KPI_dataset(
+            partition_id=partition_id,
+            num_partitions=num_partitions,
+            data_dir=data_dir,
+            batch_size=batch_size,
+            num_classes_per_partition=num_classes_per_partition
+        )
+    else:
+        return load_spectrogram_dataset(
+            partition_id=partition_id,
+            num_partitions=num_partitions,
+            data_dir=data_dir,
+            batch_size=batch_size, 
+            num_classes_per_partition=num_classes_per_partition
+        )
