@@ -73,11 +73,8 @@ def client_fn(context: Context):
     num_partitions = context.node_config["num-partitions"]
     data_dir = context.run_config["data_dir"]
     batch_size = context.run_config["batch_size"]
-
-    val = context.run_config.get("num_classes_per_partition")
-    total_classes = context.run_config["classes"]
-    num_classes_per_partition = None if val == total_classes else val
-
+    num_classes_per_partition = context.run_config["num_classes_per_partition"]
+    channels = context.run_config["channels"]
     use_multi_channel_dataset = context.run_config["use_multi_channel_dataset"]
     
     trainloader, valloader = load_data(
@@ -86,7 +83,8 @@ def client_fn(context: Context):
         data_dir=data_dir,
         batch_size=batch_size,
         num_classes_per_partition=num_classes_per_partition,
-        use_multi_channel_dataset=use_multi_channel_dataset
+        use_multi_channel_dataset=use_multi_channel_dataset,
+        channels=channels
     )
 
     local_epochs = context.run_config["local-epochs"]

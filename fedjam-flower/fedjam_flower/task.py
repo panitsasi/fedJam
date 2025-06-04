@@ -10,19 +10,22 @@ import random
 import numpy as np
 from torch.utils.data import DataLoader, Subset
 from datasets import load_dataset
-from fedjam_flower.custom_augment import CustomAugmenter
 from peft import get_peft_model_state_dict, set_peft_model_state_dict
 from collections import Counter
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+from augmenter.custom_augment import CustomAugmenter
+from augmenter.custom_augment_multi_channel import CustomAugmenterForMultiChannel
+
+
 
 dataset_dict = None  
 
 def load_spectrogram_dataset(partition_id: int, num_partitions: int, data_dir: str = None, 
                        batch_size: int = 128, num_classes_per_partition: int = 4):
 
-    if num_classes_per_partition == None: 
-        num_classes_per_partition = 4
-    
     print(f"Loading dataset {partition_id + 1} / {num_partitions}", flush=True)
+
     global dataset_dict
     if dataset_dict is None:
         dataset_dict = load_dataset("imagefolder", data_dir=data_dir)
@@ -62,9 +65,10 @@ def load_spectrogram_dataset(partition_id: int, num_partitions: int, data_dir: s
 
 
 class Multi_Channel_Dataset(Dataset):
-    def __init__(self, root_dir, class_to_idx=None):
+    def __init__(self, root_dir, class_to_idx=None, transform=None):
         self.samples = []
         self.class_to_idx = class_to_idx or self._find_classes(root_dir)
+        self.transform = transform
 
         for class_name, class_idx in self.class_to_idx.items():
             class_folder = os.path.join(root_dir, class_name)
@@ -84,6 +88,10 @@ class Multi_Channel_Dataset(Dataset):
         path, label = self.samples[idx]
         data = torch.load(path)
         image = data if isinstance(data, torch.Tensor) else data["image"]
+        
+        if self.transform:
+            image = self.transform(image)
+
         return {"image": image, "label": label}
 
 
@@ -96,52 +104,63 @@ class CustomLabelPartitioner:
         self.partitions = self._create_partitions()
 
     def _create_partitions(self):
+        
+        random.seed(42)
+        np.random.seed(42)
         label_to_indices = defaultdict(list)
         for idx, sample in enumerate(self.dataset):
             label = sample["label"]
             label_to_indices[label].append(idx)
 
+        # Shuffle indices for each class to avoid bias
+        for label in label_to_indices:
+            random.shuffle(label_to_indices[label])
+
+        partitions = [[] for _ in range(self.num_partitions)]
+
+        # Track how many clients have been assigned to each class
+        class_to_clients = defaultdict(list)
+
         labels = sorted(label_to_indices.keys())
         num_classes = len(labels)
 
-        if self.num_classes_per_partition is None or self.num_classes_per_partition >= num_classes:
-            # IID partitioning
-            all_indices = sum(label_to_indices.values(), [])
-            random.shuffle(all_indices)  # shuffle globally
-            return np.array_split(all_indices, self.num_partitions)
-
-        # non-IID partitioning
-        partitions = [[] for _ in range(self.num_partitions)]
-
-        for i in range(self.num_partitions):
-            # Pick random, non-repeating classes per client
+        # Assign classes to clients
+        for client_id in range(self.num_partitions):
             assigned_classes = random.sample(labels, self.num_classes_per_partition)
             for cls in assigned_classes:
-                cls_indices = label_to_indices[cls]
-                random.shuffle(cls_indices)
-                # Use a balanced sample from this class
-                take_n = len(cls_indices) // self.num_partitions
-                partitions[i].extend(cls_indices[:take_n])
+                class_to_clients[cls].append(client_id)
 
-            # Optional: shuffle the final partition for the client
-            random.shuffle(partitions[i])
+        # Distribute disjoint samples for each class across its assigned clients
+        for cls, indices in label_to_indices.items():
+            assigned_clients = class_to_clients[cls]
+            if len(assigned_clients) == 0:
+                continue  
 
-            # Debug print
-            # print(f"[Client {i}] classes: {assigned_classes}, samples: {len(partitions[i])}")
+            split_indices = np.array_split(indices, len(assigned_clients))
+            for client_id, split in zip(assigned_clients, split_indices):
+                partitions[client_id].extend(split.tolist())
 
         return partitions
-
 
     def load_partition(self, partition_id):
         return Subset(self.dataset, self.partitions[partition_id])
 
 
 def load_spectrogram_KPI_dataset(partition_id: int, num_partitions: int, data_dir: str = None,
-              batch_size: int = 128, num_classes_per_partition=None):
+              batch_size: int = 128, num_classes_per_partition=None, channels: int = 3):
+    
     print(f"Loading dataset {partition_id + 1} / {num_partitions}", flush=True)
 
-    train_dataset = Multi_Channel_Dataset(os.path.join(data_dir, "train"))
-    test_dataset = Multi_Channel_Dataset(os.path.join(data_dir, "test"), class_to_idx=train_dataset.class_to_idx)
+    mean = [0.485, 0.456, 0.406] + [0.5] * max(0, channels - 3)
+    std  = [0.229, 0.224, 0.225] + [0.25] * max(0, channels - 3)
+
+    pytorch_transforms = transforms.Compose([
+        CustomAugmenterForMultiChannel(),
+        transforms.Normalize(mean=mean[:channels], std=std[:channels])
+    ])
+
+    train_dataset = Multi_Channel_Dataset(os.path.join(data_dir, "train"), transform=pytorch_transforms)
+    test_dataset = Multi_Channel_Dataset(os.path.join(data_dir, "test"), transform=pytorch_transforms)
 
     train_partitioner = CustomLabelPartitioner(
         train_dataset, num_partitions=num_partitions, num_classes_per_partition=num_classes_per_partition, 
@@ -152,17 +171,6 @@ def load_spectrogram_KPI_dataset(partition_id: int, num_partitions: int, data_di
 
     train_partition = train_partitioner.load_partition(partition_id)
     test_partition = test_partitioner.load_partition(partition_id)
-
-    train_labels = [train_dataset[idx]["label"] for idx in train_partition.indices]
-    test_labels = [test_dataset[idx]["label"] for idx in test_partition.indices]
-
-    train_counts = Counter(train_labels)
-    test_counts = Counter(test_labels)
-
-    print(f"\n[Client {partition_id}] Class distribution:")
-    for cls in sorted(train_counts):
-        print(f"  Class {cls}: {train_counts[cls]} train / {test_counts[cls]} test samples")
-
 
     trainloader = DataLoader(train_partition, batch_size=batch_size, shuffle=True, num_workers=8)
     testloader = DataLoader(test_partition, batch_size=batch_size, shuffle=False, num_workers=8)
@@ -236,7 +244,7 @@ def set_weights(model, parameters, is_lora=False):
 
 
 def load_data(partition_id: int, num_partitions: int, data_dir: str = None,
-              batch_size: int = 128, num_classes_per_partition=None, use_multi_channel_dataset: bool = True):
+              batch_size: int = 128, num_classes_per_partition=None, use_multi_channel_dataset: bool = True, channels: int = 3):
     
     if use_multi_channel_dataset:
         return load_spectrogram_KPI_dataset(
@@ -244,7 +252,8 @@ def load_data(partition_id: int, num_partitions: int, data_dir: str = None,
             num_partitions=num_partitions,
             data_dir=data_dir,
             batch_size=batch_size,
-            num_classes_per_partition=num_classes_per_partition
+            num_classes_per_partition=num_classes_per_partition,
+            channels=channels
         )
     else:
         return load_spectrogram_dataset(

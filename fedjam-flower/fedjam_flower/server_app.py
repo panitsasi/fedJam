@@ -69,7 +69,8 @@ def get_evaluate_fn(context: Context):
                 data_dir=data_dir,
                 batch_size=batch_size,
                 num_classes_per_partition = context.run_config["classes"],
-                use_multi_channel_dataset = context.run_config["use_multi_channel_dataset"]
+                use_multi_channel_dataset = context.run_config["use_multi_channel_dataset"],
+                channels = context.run_config["channels"]
             )
 
             set_weights(model, parameters, is_lora=is_lora)
