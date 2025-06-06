@@ -16,19 +16,21 @@ from augmenter.custom_augment import CustomAugmenter
 from augmenter.custom_augment_multi_channel import CustomAugmenterForMultiChannel
 
 
-dataset_dict = None  
+_dataset_dict = None  
+_train_dataset = None
+_test_dataset = None
 
 def load_spectrogram_dataset(partition_id: int, num_partitions: int, data_dir: str = None, 
                        batch_size: int = 128, num_classes_per_partition: int = 4):
 
     print(f"Loading dataset {partition_id + 1} / {num_partitions}", flush=True)
 
-    global dataset_dict
-    if dataset_dict is None:
-        dataset_dict = load_dataset("imagefolder", data_dir=data_dir)
+    global _dataset_dict
+    if _dataset_dict is None:
+        _dataset_dict = load_dataset("imagefolder", data_dir=data_dir)
     
-    train_dataset = dataset_dict["train"]
-    test_dataset = dataset_dict["test"]
+    train_dataset = _dataset_dict["train"]
+    test_dataset = _dataset_dict["test"]
 
     partitioner1 = PathologicalPartitioner(
         num_partitions=num_partitions, partition_by="label", num_classes_per_partition=num_classes_per_partition
@@ -143,6 +145,9 @@ class CustomLabelPartitioner:
 def load_spectrogram_KPI_dataset(partition_id: int, num_partitions: int, data_dir: str = None,
               batch_size: int = 128, num_classes_per_partition=None, channels: int = 3):
     
+
+    global _train_dataset, _test_dataset
+
     print(f"Loading dataset {partition_id + 1} / {num_partitions}", flush=True)
 
     mean = [0.485, 0.456, 0.406] + [0.5] * max(0, channels - 3)
@@ -153,14 +158,17 @@ def load_spectrogram_KPI_dataset(partition_id: int, num_partitions: int, data_di
         transforms.Normalize(mean=mean[:channels], std=std[:channels])
     ])
 
-    train_dataset = Multi_Channel_Dataset(os.path.join(data_dir, "train"), transform=pytorch_transforms)
-    test_dataset = Multi_Channel_Dataset(os.path.join(data_dir, "test"), transform=pytorch_transforms)
+    if _train_dataset is None:
+        _train_dataset = Multi_Channel_Dataset(os.path.join(data_dir, "train"), transform=pytorch_transforms)
+
+    if _test_dataset is None:    
+        _test_dataset = Multi_Channel_Dataset(os.path.join(data_dir, "test"), transform=pytorch_transforms)
 
     train_partitioner = CustomLabelPartitioner(
-        train_dataset, num_partitions=num_partitions, num_classes_per_partition=num_classes_per_partition, 
+        _train_dataset, num_partitions=num_partitions, num_classes_per_partition=num_classes_per_partition, 
     )
     test_partitioner = CustomLabelPartitioner(
-        test_dataset, num_partitions=num_partitions, num_classes_per_partition=num_classes_per_partition,
+        _test_dataset, num_partitions=num_partitions, num_classes_per_partition=num_classes_per_partition,
     )
 
     train_partition = train_partitioner.load_partition(partition_id)
