@@ -29,6 +29,10 @@ def cosine_annealing(
 
 def get_model(model_name: str, is_lora: bool, is_timm: bool) -> nn.Module:
     # Initialize model parameters
+    if model_name == 'multimodal':
+        # Use custom multimodal model
+        return MultiModalNet(num_classes=4, ts_input_dim=5)
+
     if is_timm:
         # Use timm model
         model = timm.create_model(model_name, pretrained=True, num_classes=4)
@@ -56,6 +60,30 @@ def get_model(model_name: str, is_lora: bool, is_timm: bool) -> nn.Module:
 
     return model
 
+
+class MultiModalNet(nn.Module):
+    def __init__(self, num_classes, ts_input_dim=5):
+        super().__init__()
+        self.vision_model = timm.create_model(
+            "mobilenetv3_small_100.lamb_in1k", pretrained=True, num_classes=0
+        )
+        self.vision_output_dim = 1024 # Output dimension of MobileNetV3 small
+
+        self.ts_hidden_dim = 128
+        self.rnn = nn.GRU(input_size=ts_input_dim, hidden_size=self.ts_hidden_dim, batch_first=True)
+
+        self.fc = nn.Sequential(
+            nn.Linear(self.vision_output_dim + self.ts_hidden_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, num_classes)
+        )
+
+    def forward(self, images, timeseries):
+        img_feat = self.vision_model(images)              # (B, 1024)
+        _, ts_feat = self.rnn(timeseries)                 # (1, B, 128)
+        ts_feat = ts_feat.squeeze(0)                      # (B, 128)
+        combined = torch.cat([img_feat, ts_feat], dim=1)  # (B, 1152)
+        return self.fc(combined)
 
 def get_size_in_mb(obj):
     """Calculate size of PyTorch objects in MB."""

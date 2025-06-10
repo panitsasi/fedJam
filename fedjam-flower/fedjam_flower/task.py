@@ -12,7 +12,7 @@ from torchvision import transforms
 import random
 import numpy as np
 
-from datasets import load_dataset
+from datasets import load_dataset, load_from_disk
 from fedjam_flower.custom_augment import CustomAugmenter
 
 from peft import (
@@ -27,12 +27,26 @@ dataset_dict = None  # Cache FederatedDataset
 
 
 def load_data(partition_id: int, num_partitions: int, data_dir: str = None,
-              batch_size: int = 128, classes_per_partition: int = 4):
+              batch_size: int = 128, classes_per_partition: int = 4,
+              is_multimodal: bool = False):
     # Only initialize `FederatedDataset` once
     print(f"Loading dataset {partition_id + 1} / {num_partitions}", flush=True)
     global dataset_dict
     if dataset_dict is None:
-        dataset_dict = load_dataset("imagefolder", data_dir=data_dir)
+        if is_multimodal:
+            dataset_dict = load_from_disk(data_dir)
+
+            # Encode string labels to integers
+            labels = sorted(set(dataset_dict["train"]["label"]))
+            label2id = {lbl: i for i, lbl in enumerate(labels)}
+
+            def encode_label(example):
+                example["label"] = label2id[example["label"]]
+                return example
+
+            dataset_dict = dataset_dict.map(encode_label)
+        else:
+            dataset_dict = load_dataset("imagefolder", data_dir=data_dir)
     
     train_dataset = dataset_dict["train"]
     test_dataset = dataset_dict["test"]
@@ -40,11 +54,13 @@ def load_data(partition_id: int, num_partitions: int, data_dir: str = None,
     # Using PathologicalPartitioner to specify number of classes per partition (IID)
     partitioner1 = PathologicalPartitioner(
         num_partitions=num_partitions, partition_by="label",
-        num_classes_per_partition=classes_per_partition
+        num_classes_per_partition=classes_per_partition,
+        class_assignment_mode="deterministic"
     )
     partitioner2 = PathologicalPartitioner(
         num_partitions=num_partitions, partition_by="label",
-        num_classes_per_partition=classes_per_partition
+        num_classes_per_partition=classes_per_partition,
+        class_assignment_mode="deterministic"
     )
     partitioner1.dataset = train_dataset
     train_partition = partitioner1.load_partition(partition_id)
@@ -52,25 +68,46 @@ def load_data(partition_id: int, num_partitions: int, data_dir: str = None,
     partitioner2.dataset = test_dataset
     test_partition = partitioner2.load_partition(partition_id)
 
-    pytorch_transforms = transforms.Compose([
-        CustomAugmenter(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225])
-    ])
+    if is_multimodal:
+        transform = transforms.Compose([
+            CustomAugmenter(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                std=[0.229, 0.224, 0.225])
+        ])
 
-    def apply_transforms(batch):
-        """Apply transforms to the partition from FederatedDataset."""
-        batch["image"] = [pytorch_transforms(img) for img in batch["image"]]
-        return batch
+        def collate_fn(batch):
+            images = [transform(example["image"]) for example in batch]
+            timeseries = [torch.tensor(example["timeseries"], dtype=torch.float32) for example in batch]
+            labels = [example["label"] for example in batch]
+            return (
+                torch.stack(images),
+                torch.stack(timeseries),
+                torch.tensor(labels)
+            )
+        trainloader = DataLoader(train_partition, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+        testloader = DataLoader(test_partition, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+    else:
+        pytorch_transforms = transforms.Compose([
+            CustomAugmenter(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                std=[0.229, 0.224, 0.225])
+        ])
 
-    train_partition = train_partition.with_transform(apply_transforms)
-    test_partition = test_partition.with_transform(apply_transforms)
-    trainloader = DataLoader(train_partition, batch_size=batch_size, shuffle=True, num_workers=8)
-    testloader = DataLoader(test_partition, batch_size=batch_size, num_workers=8)
+        def apply_transforms(batch):
+            """Apply transforms to the partition from FederatedDataset."""
+            batch["image"] = [pytorch_transforms(img) for img in batch["image"]]
+            return batch
+
+        train_partition = train_partition.with_transform(apply_transforms)
+        test_partition = test_partition.with_transform(apply_transforms)
+
+        trainloader = DataLoader(train_partition, batch_size=batch_size, shuffle=True)
+        testloader = DataLoader(test_partition, batch_size=batch_size)
     return trainloader, testloader
 
 
-def train(model, trainloader, epochs, device, lr=5e-5, is_lora=False, is_timm=False):
+def train(model, trainloader, epochs, device, lr=5e-5, is_lora=False, is_timm=False,
+          is_multimodal=False):
     """Train the model on the training set."""
     model.to(device)
     criterion = torch.nn.CrossEntropyLoss().to(device)
@@ -79,14 +116,21 @@ def train(model, trainloader, epochs, device, lr=5e-5, is_lora=False, is_timm=Fa
     running_loss = 0.0
     for _ in range(epochs):
         for batch in trainloader:
-            images, labels = batch["image"], batch["label"]
-            images, labels = images.to(device), labels.to(device)
-            if is_timm:
-                outputs = model(images)
-            else:
-                outputs = model(pixel_values=images).logits
-            optimizer.zero_grad()
-            loss = criterion(outputs, labels)
+            if is_multimodal:
+                images, timeseries, labels = batch
+                images, timeseries, labels = images.to(device), timeseries.to(device), labels.to(device)
+                logits = model(images, timeseries)
+                optimizer.zero_grad()
+                loss = criterion(logits, labels)
+            else: 
+                images, labels = batch["image"], batch["label"]
+                images, labels = images.to(device), labels.to(device)
+                if is_timm:
+                    outputs = model(images)
+                else:
+                    outputs = model(pixel_values=images).logits
+                optimizer.zero_grad()
+                loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
@@ -95,21 +139,30 @@ def train(model, trainloader, epochs, device, lr=5e-5, is_lora=False, is_timm=Fa
     return avg_trainloss
 
 
-def test(model, testloader, device, is_lora=False, is_timm=False):
+def test(model, testloader, device, is_lora=False, is_timm=False,
+         is_multimodal=False):
     """Validate the model on the test set."""
     model.to(device)
     criterion = torch.nn.CrossEntropyLoss()
     correct, loss = 0, 0.0
     with torch.no_grad():
         for batch in testloader:
-            images, labels = batch["image"], batch["label"]
-            images, labels = images.to(device), labels.to(device)
-            if is_timm:
-                outputs = model(images)
+            if is_multimodal:
+                images, timeseries, labels = batch
+                images, timeseries, labels = images.to(device), timeseries.to(device), labels.to(device)
+                logits = model(images, timeseries)
+                preds = logits.argmax(dim=1)
+                correct += (preds == labels).sum().item()
+                loss = criterion(logits, labels).item()
             else:
-                outputs = model(pixel_values=images).logits
-            loss += criterion(outputs, labels).item()
-            correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
+                images, labels = batch["image"], batch["label"]
+                images, labels = images.to(device), labels.to(device)
+                if is_timm:
+                    outputs = model(images)
+                else:
+                    outputs = model(pixel_values=images).logits
+                loss += criterion(outputs, labels).item()
+                correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
     accuracy = correct / len(testloader.dataset)
     loss = loss / len(testloader)
     return loss, accuracy

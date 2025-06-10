@@ -33,6 +33,7 @@ def get_evaluate_fn(context: Context):
     is_timm = context.run_config["is_timm"]
     dataset_version = context.run_config["dataset_version"]
     classes_per_partition = context.run_config["classes_per_partition"]
+    is_multimodal = 'multimodal' in model_name.lower()
     
     # Use timestamp to distinguish different runs
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -62,9 +63,11 @@ def get_evaluate_fn(context: Context):
         if server_round != 0:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             model = get_model(model_name, is_lora, is_timm).to(device).eval()
-            _, testloader = load_data(0, 1, data_dir=data_dir, batch_size=batch_size)
+            _, testloader = load_data(0, 1, data_dir=data_dir, batch_size=batch_size,
+                                       is_multimodal=is_multimodal)
             set_weights(model, parameters, is_lora=is_lora)
-            loss, accuracy = test(model, testloader, device, is_lora=is_lora, is_timm=is_timm)
+            loss, accuracy = test(model, testloader, device, is_lora=is_lora, is_timm=is_timm,
+                                  is_multimodal=is_multimodal)
             print(f"Server-side evaluation loss {loss} / accuracy {accuracy}")
 
             # Log metrics to TensorBoard

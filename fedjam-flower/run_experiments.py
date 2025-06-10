@@ -9,7 +9,7 @@ from params import param_grid
 # CONFIGURATION
 BASE_TOML = "pyproject.toml"
 BACKUP_TOML = "pyproject.backup.toml"
-GPU_POOL = ["1", "2", "3"]  # List of available GPU IDs
+GPU_POOL = ["0", "1", "2", "3"]  # List of available GPU IDs
 MAX_PARALLEL = len(GPU_POOL)
 DELAY_BETWEEN_LAUNCHES = 20  # seconds
 
@@ -37,7 +37,7 @@ def launch_experiment(i, params, gpu_id):
     with open(BASE_TOML, 'w') as f:
         toml.dump(config, f)
 
-    log_file = f"logs/experiment_{i}.log"
+    log_file = f"logs/experiment_{i}_{time.strftime('%Y%m%d_%H%M%S')}.log"
     log_f = open(log_file, "w")
 
     cmd = ["flwr", "run"]

@@ -7,6 +7,7 @@ __pycache__/
 .flwr
 flowertune/
 logs/
+runs/
 
 # C extensions
 *.so

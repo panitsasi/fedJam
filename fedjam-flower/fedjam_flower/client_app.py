@@ -32,6 +32,7 @@ class FlowerClient(NumPyClient):
         self.is_timm = context["is_timm"]
         self.is_warmup = context["is_warmup"]
         self.random_seed = context["random_seed"]
+        self.is_multimodal = 'multimodal' in context["model_name"].lower()
 
     def fit(self, parameters, config):
         # Set seed for reproducibility
@@ -66,6 +67,7 @@ class FlowerClient(NumPyClient):
             lr=new_lr,
             is_lora=self.is_lora,
             is_timm=self.is_timm,
+            is_multimodal=self.is_multimodal,
         )
         return (
             get_weights(self.model, is_lora=self.is_lora),
@@ -75,21 +77,25 @@ class FlowerClient(NumPyClient):
 
     def evaluate(self, parameters, config):
         set_weights(self.model, parameters, is_lora=self.is_lora)
-        loss, accuracy = test(self.model, self.valloader, self.device, is_lora=self.is_lora, is_timm=self.is_timm)
+        loss, accuracy = test(self.model, self.valloader, self.device, is_lora=self.is_lora, is_timm=self.is_timm,
+                              is_multimodal=self.is_multimodal)
         return loss, len(self.valloader.dataset), {"accuracy": accuracy}
 
 
 def client_fn(context: Context):
     # Load model and data
-    model = get_model(context.run_config["model_name"], context.run_config["is_lora"], context.run_config["is_timm"])
+    model_name = context.run_config["model_name"]
+    model = get_model(model_name, context.run_config["is_lora"], context.run_config["is_timm"])
     partition_id = context.node_config["partition-id"]
     num_partitions = context.node_config["num-partitions"]
     data_dir = context.run_config["data_dir"]
     batch_size = context.run_config["batch_size"]
     classes_per_partition = context.run_config["classes_per_partition"]
+    is_multimodal = 'multimodal' in model_name.lower()
     trainloader, valloader = load_data(partition_id, num_partitions,
                                        data_dir=data_dir, batch_size=batch_size,
-                                       classes_per_partition=classes_per_partition)
+                                       classes_per_partition=classes_per_partition,
+                                       is_multimodal=is_multimodal)
     local_epochs = context.run_config["local-epochs"]
 
     # Return Client instance
