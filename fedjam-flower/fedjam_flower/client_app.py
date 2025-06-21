@@ -88,7 +88,7 @@ def client_fn(context: Context):
     model = get_model(model_name, context.run_config["is_lora"], context.run_config["is_timm"])
     partition_id = context.node_config["partition-id"]
     num_partitions = context.node_config["num-partitions"]
-    data_dir = context.run_config["data_dir"]
+    data_dir = context.node_config.get("data_dir") or context.run_config["data_dir"]
     batch_size = context.run_config["batch_size"]
     classes_per_partition = context.run_config["classes_per_partition"]
     is_multimodal = 'multimodal' in model_name.lower()
