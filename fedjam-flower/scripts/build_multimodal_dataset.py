@@ -1,14 +1,51 @@
 """
-Builds a multimodal dataset from spectrogram images and corresponding KPIs
-in a Hugging Face Dataset format, required for running with flower.
+Multimodal Dataset Builder for Flower FL — Spectrogram + KPI (Hugging Face Format)
 
-Requires:
-- The multimodal dataset files (spectro_flower_multimodal) in base_path.
+This script constructs a Hugging Face `DatasetDict` for multimodal learning tasks using:
+- Timeseries KPI data (e.g., SNR, latency, throughput) from `.csv` files
+- Spectrogram images from `.png` files
 
-Usage:
-- Modify Constants
-- Modify the `base_path` variable to point to your dataset directory.
-- Run the script to create a Hugging Face DatasetDict with 'train' and 'test' splits.
+Each data sample consists of:
+- `image`: RGB spectrogram image (PIL.Image)
+- `timeseries`: Downsampled and fixed-length 2D float array of selected KPIs
+- `label`: String label derived from directory name
+
+Configurable Global Variables
+-------------------------------
+- `MAX_LEN`: Max number of timesteps after downsampling (e.g., 256)
+- `DOWNSAMPLE_FACTOR`: Keep every N-th row from raw KPI sequences (e.g., 75 from ~18,000 rows → ~240)
+- `KPI_COLUMNS`: List of KPI column names to use, e.g., `["SNR", "Latency"]`. Set to `None` to include all.
+- `OUTPUT_DIR_ROOT`: Base output path for generated datasets
+
+Output
+--------
+- The dataset is saved to a dynamically generated folder name based on the configuration:
+  Format: `hf_dataset.down{DOWNSAMPLE_FACTOR}.len{MAX_LEN}.cols_{col_tag}`
+  Example: `hf_dataset.down75.len256.cols_snr-lat`
+
+Requirements
+---------------
+- Directory structure must be:
+  base_path/
+    ├── train/
+    │    ├── class1/
+    │    │     ├── images/*.png
+    │    │     └── kpis/*.csv
+    └── test/
+         ├── class2/
+         │     ├── images/*.png
+         │     └── kpis/*.csv
+
+- CSV files must share consistent columns across samples and may optionally include a "Time" column (which is ignored).
+
+Usage
+-------
+- Edit the constants at the top of the script.
+- Run the script:
+    `python create_multimodal_dataset.py`
+- Load with Hugging Face:
+    `dataset = datasets.load_from_disk(<output_path>)`
+
 """
 
 
@@ -19,10 +56,18 @@ import numpy as np
 from PIL import Image as PILImage
 from tqdm import tqdm
 
-# Constants
-MAX_LEN = 19000
-NUM_FEATURES = 5 # Number of features in the timeseries data (SNR, Latency, etc.)
-CHUNK_SIZE = 5000  # To avoid Arrow overflow
+# === Dataset Configuration ===
+MAX_LEN = 512                      # Max sequence length after downsampling (256, )
+DOWNSAMPLE_FACTOR = 50             # Reduces ~18000 rows → ~240 (e.g., 50, 75)
+KPI_COLUMNS = None                 # e.g. ["SNR", "Latency"] or None to use all
+CHUNK_SIZE = 5000                  # For Arrow memory safety
+
+# === Output directory (dynamically named) ===
+OUTPUT_DIR_ROOT = "/home/iofeidis/workspace/hf_dataset"
+
+# === Global feature count placeholder (set dynamically) ===
+NUM_FEATURES = None
+
 
 def pad_or_truncate(arr, max_len=MAX_LEN):
     pad_size = max_len - len(arr)
@@ -31,7 +76,9 @@ def pad_or_truncate(arr, max_len=MAX_LEN):
     else:
         return arr[:max_len]
 
+
 def load_split(split_dir):
+    global NUM_FEATURES
     samples = []
     label_dirs = [d for d in split_dir.iterdir() if d.is_dir()]
 
@@ -57,10 +104,20 @@ def load_split(split_dir):
 
             try:
                 df = pd.read_csv(csv_path).drop(columns=["Time"], errors="ignore")
+
+                if KPI_COLUMNS is not None:
+                    df = df[KPI_COLUMNS]  # Subset the KPI columns
+                df = df.iloc[::DOWNSAMPLE_FACTOR].reset_index(drop=True)
+
                 df = df.fillna(0.0)
-                timeseries = pad_or_truncate(df.to_numpy(dtype=np.float32))
+                arr = df.to_numpy(dtype=np.float32)
+
+                if NUM_FEATURES is None:
+                    NUM_FEATURES = arr.shape[1]
+
+                timeseries = pad_or_truncate(arr)
             except Exception as e:
-                print(f"Failed to load CSV {csv_path}: {e}")
+                print(f"Failed to process {csv_path}: {e}")
                 continue
 
             samples.append({
@@ -71,17 +128,23 @@ def load_split(split_dir):
 
     return samples
 
+
 def chunk_list(data, chunk_size):
     for i in range(0, len(data), chunk_size):
         yield data[i:i + chunk_size]
+
 
 # === Load raw data ===
 base_path = Path("/home/ioannis/Desktop/spectrograms/spectro_flower_multimodal")
 train_data = load_split(base_path / "train")
 test_data = load_split(base_path / "test")
 
+# === Check NUM_FEATURES was correctly set
+if NUM_FEATURES is None:
+    raise ValueError("No timeseries data found to determine NUM_FEATURES.")
+
 # === Define dataset features ===
-print("\n🔧 Defining dataset features...")
+print(f"\n🔧 Defining dataset features with shape=({MAX_LEN}, {NUM_FEATURES})...")
 features = Features({
     "image": Image(),
     "timeseries": Array2D(dtype="float32", shape=(MAX_LEN, NUM_FEATURES)),
@@ -113,7 +176,14 @@ dataset = DatasetDict({
 
 # === Save to disk ===
 print("\n💾 Saving to disk...")
-dataset.save_to_disk("/home/ioannis/Desktop/spectrograms/hf_dataset")
+# === Build dynamic output folder name
+col_tag = "all" if KPI_COLUMNS is None else "-".join([c[:3].lower() for c in KPI_COLUMNS])
+output_name = f"hf_dataset.down{DOWNSAMPLE_FACTOR}.len{MAX_LEN}.cols_{col_tag}"
+output_path = Path(OUTPUT_DIR_ROOT).parent / output_name
+
+print(f"\n💾 Saving to disk at: {output_path}")
+dataset.save_to_disk(str(output_path))
+
 
 print("\n✅ Done! Dataset summary:")
 print(dataset)

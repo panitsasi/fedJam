@@ -28,7 +28,12 @@ dataset_dict = None  # Cache FederatedDataset
 
 def load_data(partition_id: int, num_partitions: int, data_dir: str = None,
               batch_size: int = 128, classes_per_partition: int = 4,
-              is_multimodal: bool = False):
+              is_multimodal: bool = False, modality: str = "both"):
+    """
+    Load data with modality selection.
+    Args:
+        modality: One of "both", "image", or "timeseries"
+    """
     # Only initialize `FederatedDataset` once
     print(f"Loading dataset {partition_id + 1} / {num_partitions}", flush=True)
     global dataset_dict
@@ -76,16 +81,30 @@ def load_data(partition_id: int, num_partitions: int, data_dir: str = None,
         ])
 
         def collate_fn(batch):
-            images = [transform(example["image"]) for example in batch]
-            timeseries = [torch.tensor(example["timeseries"], dtype=torch.float32) for example in batch]
-            labels = [example["label"] for example in batch]
-            return (
-                torch.stack(images),
-                torch.stack(timeseries),
-                torch.tensor(labels)
-            )
+            if modality in ["both", "image"]:
+                images = [transform(example["image"]) for example in batch]
+                images = torch.stack(images)
+            else:
+                images = None
+
+            if modality in ["both", "timeseries"]:
+                timeseries = [torch.tensor(example["timeseries"], dtype=torch.float32) for example in batch]
+                timeseries = torch.stack(timeseries)
+            else:
+                timeseries = None
+
+            labels = torch.tensor([example["label"] for example in batch])
+
+            if modality == "both":
+                return images, timeseries, labels
+            elif modality == "image":
+                return {"image": images, "label": labels}
+            else:  # timeseries
+                return {"timeseries": timeseries, "label": labels}
+
         trainloader = DataLoader(train_partition, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
         testloader = DataLoader(test_partition, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+
     else:
         pytorch_transforms = transforms.Compose([
             CustomAugmenter(),
@@ -114,23 +133,32 @@ def train(model, trainloader, epochs, device, lr=5e-5, is_lora=False, is_timm=Fa
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr)
     model.train()
     running_loss = 0.0
+    
     for _ in range(epochs):
         for batch in trainloader:
             if is_multimodal:
-                images, timeseries, labels = batch
-                images, timeseries, labels = images.to(device), timeseries.to(device), labels.to(device)
-                logits = model(images, timeseries)
-                optimizer.zero_grad()
-                loss = criterion(logits, labels)
-            else: 
+                if isinstance(batch, (tuple, list)):  # Full multimodal data
+                    images, timeseries, labels = batch
+                    images = images.to(device) if images is not None else None
+                    timeseries = timeseries.to(device) if timeseries is not None else None
+                    labels = labels.to(device)
+                    logits = model(images, timeseries)
+                else:  # Single modality dict format
+                    labels = batch["label"].to(device)
+                    if "image" in batch:
+                        logits = model(images=batch["image"].to(device))
+                    else:
+                        logits = model(timeseries=batch["timeseries"].to(device))
+            else:
                 images, labels = batch["image"], batch["label"]
                 images, labels = images.to(device), labels.to(device)
                 if is_timm:
-                    outputs = model(images)
+                    logits = model(images)
                 else:
-                    outputs = model(pixel_values=images).logits
-                optimizer.zero_grad()
-                loss = criterion(outputs, labels)
+                    logits = model(pixel_values=images).logits
+
+            optimizer.zero_grad()
+            loss = criterion(logits, labels)
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
@@ -144,28 +172,38 @@ def test(model, testloader, device, is_lora=False, is_timm=False,
     """Validate the model on the test set."""
     model.to(device)
     criterion = torch.nn.CrossEntropyLoss()
-    correct, loss = 0, 0.0
+    correct, total_loss = 0, 0.0
+    
     with torch.no_grad():
         for batch in testloader:
             if is_multimodal:
-                images, timeseries, labels = batch
-                images, timeseries, labels = images.to(device), timeseries.to(device), labels.to(device)
-                logits = model(images, timeseries)
-                preds = logits.argmax(dim=1)
-                correct += (preds == labels).sum().item()
-                loss = criterion(logits, labels).item()
+                if isinstance(batch, (tuple, list)):  # Full multimodal data
+                    images, timeseries, labels = batch
+                    images = images.to(device) if images is not None else None
+                    timeseries = timeseries.to(device) if timeseries is not None else None
+                    labels = labels.to(device)
+                    logits = model(images, timeseries)
+                else:  # Single modality dict format
+                    labels = batch["label"].to(device)
+                    if "image" in batch:
+                        logits = model(images=batch["image"].to(device))
+                    else:
+                        logits = model(timeseries=batch["timeseries"].to(device))
             else:
                 images, labels = batch["image"], batch["label"]
                 images, labels = images.to(device), labels.to(device)
                 if is_timm:
-                    outputs = model(images)
+                    logits = model(images)
                 else:
-                    outputs = model(pixel_values=images).logits
-                loss += criterion(outputs, labels).item()
-                correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
+                    logits = model(pixel_values=images).logits
+            
+            loss = criterion(logits, labels)
+            total_loss += loss.item()
+            correct += (torch.max(logits.data, 1)[1] == labels).sum().item()
+
     accuracy = correct / len(testloader.dataset)
-    loss = loss / len(testloader)
-    return loss, accuracy
+    avg_loss = total_loss / len(testloader)
+    return avg_loss, accuracy
 
 
 def get_weights(model, is_lora=False):

@@ -27,11 +27,24 @@ def cosine_annealing(
     return lrate_min + 0.5 * (lrate_max - lrate_min) * (1 + math.cos(cos_inner))
 
 
-def get_model(model_name: str, is_lora: bool, is_timm: bool) -> nn.Module:
+def get_model(model_name: str, is_lora: bool, is_timm: bool, modality: str = "both") -> nn.Module:
     # Initialize model parameters
     if model_name == 'multimodal':
-        # Use custom multimodal model
-        return MultiModalNet(num_classes=4, ts_input_dim=5)
+        # Use custom multimodal model with specified modality
+        has_vision = modality in ["both", "image"]
+        has_timeseries = modality in ["both", "timeseries"]
+        if modality == "image":
+            return MultiModalNet(num_classes=4, ts_input_dim=5, 
+                               has_vision=True, 
+                               has_timeseries=False)
+        elif modality == "timeseries":
+            return MultiModalNet(num_classes=4, ts_input_dim=5, 
+                               has_vision=False, 
+                               has_timeseries=True)
+        else:  # both
+            return MultiModalNet(num_classes=4, ts_input_dim=5, 
+                               has_vision=True, 
+                               has_timeseries=True)
 
     if is_timm:
         # Use timm model
@@ -62,27 +75,69 @@ def get_model(model_name: str, is_lora: bool, is_timm: bool) -> nn.Module:
 
 
 class MultiModalNet(nn.Module):
-    def __init__(self, num_classes, ts_input_dim=5):
+    def __init__(self, num_classes, ts_input_dim=5, has_vision=True, has_timeseries=True):
         super().__init__()
-        self.vision_model = timm.create_model(
-            "mobilenetv3_small_100.lamb_in1k", pretrained=True, num_classes=0
-        )
-        self.vision_output_dim = 1024 # Output dimension of MobileNetV3 small
-
-        self.ts_hidden_dim = 128
-        self.rnn = nn.GRU(input_size=ts_input_dim, hidden_size=self.ts_hidden_dim, batch_first=True)
-
+        self.has_vision = has_vision
+        self.has_timeseries = has_timeseries
+        
+        # Vision components
+        self.vision_output_dim = 1024 if has_vision else 0
+        if has_vision:
+            self.vision_model = timm.create_model(
+                "mobilenetv3_small_100.lamb_in1k", pretrained=True, num_classes=0
+            )
+        
+        # Timeseries components - fixed dimensions for consistency
+        self.ts_input_dim = ts_input_dim
+        self.ts_hidden_dim = 128 if has_timeseries else 0
+        if has_timeseries:
+            self.rnn = nn.GRU(
+                input_size=self.ts_input_dim,
+                hidden_size=self.ts_hidden_dim,
+                batch_first=True
+            )
+        
+        # Combined features dimension
+        self.combined_dim = self.vision_output_dim + self.ts_hidden_dim
+        
+        # Ensure FC layers have consistent dimensions
         self.fc = nn.Sequential(
-            nn.Linear(self.vision_output_dim + self.ts_hidden_dim, 256),
+            nn.Linear(self.combined_dim, 256),
             nn.ReLU(),
             nn.Linear(256, num_classes)
         )
 
-    def forward(self, images, timeseries):
-        img_feat = self.vision_model(images)              # (B, 1024)
-        _, ts_feat = self.rnn(timeseries)                 # (1, B, 128)
-        ts_feat = ts_feat.squeeze(0)                      # (B, 128)
-        combined = torch.cat([img_feat, ts_feat], dim=1)  # (B, 1152)
+    def forward(self, images=None, timeseries=None):
+        batch_size = images.shape[0] if images is not None else timeseries.shape[0]
+        device = next(self.parameters()).device
+        
+        # Handle vision features
+        if self.has_vision:
+            if images is None:
+                img_feat = torch.zeros(batch_size, self.vision_output_dim, device=device)
+            else:
+                img_feat = self.vision_model(images)
+        else:
+            img_feat = torch.tensor([], device=device)
+            
+        # Handle timeseries features
+        if self.has_timeseries:
+            if timeseries is None:
+                ts_feat = torch.zeros(batch_size, self.ts_hidden_dim, device=device)
+            else:
+                _, ts_feat = self.rnn(timeseries)
+                ts_feat = ts_feat.squeeze(0)
+        else:
+            ts_feat = torch.tensor([], device=device)
+            
+        # Combine available features
+        features = []
+        if self.has_vision:
+            features.append(img_feat)
+        if self.has_timeseries:
+            features.append(ts_feat)
+            
+        combined = torch.cat(features, dim=1)
         return self.fc(combined)
 
 def get_size_in_mb(obj):

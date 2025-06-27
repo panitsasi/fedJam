@@ -85,7 +85,9 @@ class FlowerClient(NumPyClient):
 def client_fn(context: Context):
     # Load model and data
     model_name = context.run_config["model_name"]
-    model = get_model(model_name, context.run_config["is_lora"], context.run_config["is_timm"])
+    modality = context.run_config.get("modality", "both")  # Default to both if not specified
+    model = get_model(model_name, context.run_config["is_lora"], 
+                     context.run_config["is_timm"], modality=modality)
     partition_id = context.node_config["partition-id"]
     num_partitions = context.node_config["num-partitions"]
     data_dir = context.node_config.get("data_dir") or context.run_config["data_dir"]
@@ -93,9 +95,10 @@ def client_fn(context: Context):
     classes_per_partition = context.run_config["classes_per_partition"]
     is_multimodal = 'multimodal' in model_name.lower()
     trainloader, valloader = load_data(partition_id, num_partitions,
-                                       data_dir=data_dir, batch_size=batch_size,
-                                       classes_per_partition=classes_per_partition,
-                                       is_multimodal=is_multimodal)
+                                     data_dir=data_dir, batch_size=batch_size,
+                                     classes_per_partition=classes_per_partition,
+                                     is_multimodal=is_multimodal,
+                                     modality=modality)
     local_epochs = context.run_config["local-epochs"]
 
     # Return Client instance

@@ -8,6 +8,8 @@ __pycache__/
 flowertune/
 logs/
 runs/
+scripts/scp_to_jetsons.sh
+*tar.gz
 
 # C extensions
 *.so

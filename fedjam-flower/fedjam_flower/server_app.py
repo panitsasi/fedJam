@@ -33,6 +33,7 @@ def get_evaluate_fn(context: Context):
     is_timm = context.run_config["is_timm"]
     dataset_version = context.run_config["dataset_version"]
     classes_per_partition = context.run_config["classes_per_partition"]
+    modality = context.run_config.get("modality", "both")  # Get modality from config
     is_multimodal = 'multimodal' in model_name.lower()
     
     # Use timestamp to distinguish different runs
@@ -62,9 +63,20 @@ def get_evaluate_fn(context: Context):
     def evaluate(server_round: int, parameters, config):
         if server_round != 0:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            model = get_model(model_name, is_lora, is_timm).to(device).eval()
-            _, testloader = load_data(0, 1, data_dir=data_dir, batch_size=batch_size,
-                                       is_multimodal=is_multimodal)
+            model = get_model(
+                model_name, 
+                is_lora, 
+                is_timm,
+                modality=modality  # Pass modality to get_model
+            ).to(device).eval()
+            
+            _, testloader = load_data(
+                0, 1, 
+                data_dir=data_dir, 
+                batch_size=batch_size,
+                is_multimodal=is_multimodal,
+                modality=modality  # Pass modality to load_data
+            )
             set_weights(model, parameters, is_lora=is_lora)
             loss, accuracy = test(model, testloader, device, is_lora=is_lora, is_timm=is_timm,
                                   is_multimodal=is_multimodal)
@@ -98,7 +110,13 @@ def server_fn(context: Context):
     # Read from config
     num_rounds = context.run_config["num-server-rounds"]
     fraction_fit = context.run_config["fraction-fit"]
-    model = get_model(context.run_config["model_name"], context.run_config["is_lora"], context.run_config["is_timm"])
+    modality = context.run_config.get("modality", "both")  # Get modality from config
+    model = get_model(
+        context.run_config["model_name"], 
+        context.run_config["is_lora"], 
+        context.run_config["is_timm"],
+        modality=modality  # Pass modality to get_model
+    )
     is_lora = context.run_config["is_lora"]
     ndarrays = get_weights(model, is_lora=is_lora)
     parameters = ndarrays_to_parameters(ndarrays)
