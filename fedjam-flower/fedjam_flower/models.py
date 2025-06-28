@@ -75,29 +75,58 @@ def get_model(model_name: str, is_lora: bool, is_timm: bool, modality: str = "bo
 
 
 class MultiModalNet(nn.Module):
-    def __init__(self, num_classes, ts_input_dim=5, has_vision=True, has_timeseries=True):
+    def __init__(
+        self, num_classes, ts_input_dim=5, ts_model='cnn', has_vision=True, has_timeseries=True
+    ):
         super().__init__()
         self.has_vision = has_vision
         self.has_timeseries = has_timeseries
+        self.ts_model = ts_model.lower()
+        self.ts_input_dim = ts_input_dim
         
-        # Vision components
-        self.vision_output_dim = 1024 if has_vision else 0
+        self.vision_output_dim = 1280 if has_vision else 0 # Mobilenet: 1024, EfficientNet: 1280
         if has_vision:
             self.vision_model = timm.create_model(
-                "mobilenetv3_small_100.lamb_in1k", pretrained=True, num_classes=0
+                "efficientnet_b0", pretrained=True, num_classes=0
             )
-        
-        # Timeseries components - fixed dimensions for consistency
-        self.ts_input_dim = ts_input_dim
-        self.ts_hidden_dim = 128 if has_timeseries else 0
+
+        # -------- Timeseries Module --------
+        self.ts_hidden_dim = 0
         if has_timeseries:
-            self.rnn = nn.GRU(
-                input_size=self.ts_input_dim,
-                hidden_size=self.ts_hidden_dim,
-                batch_first=True
-            )
-        
-        # Combined features dimension
+            if self.ts_model == 'gru':
+                self.ts_hidden_dim = 128
+                self.ts_module = nn.GRU(
+                    input_size=ts_input_dim,
+                    hidden_size=self.ts_hidden_dim,
+                    batch_first=True
+                )
+            elif self.ts_model == 'lstm':
+                self.ts_hidden_dim = 128
+                self.ts_module = nn.LSTM(
+                    input_size=ts_input_dim,
+                    hidden_size=self.ts_hidden_dim,
+                    batch_first=True
+                )
+            elif self.ts_model == 'cnn':
+                self.ts_hidden_dim = 128
+                self.ts_module = nn.Sequential(
+                    nn.Conv1d(ts_input_dim, 64, kernel_size=3, padding=1),
+                    nn.ReLU(),
+                    nn.Conv1d(64, self.ts_hidden_dim, kernel_size=3, padding=1),
+                    nn.ReLU(),
+                    nn.AdaptiveAvgPool1d(1),  # Output shape: (B, H, 1)
+                )
+            elif self.ts_model == 'transformer':
+                self.ts_hidden_dim = ts_input_dim  # Keep same dim for attention
+                encoder_layer = nn.TransformerEncoderLayer(
+                    d_model=ts_input_dim, nhead=1, dim_feedforward=128, batch_first=True
+                )
+                self.ts_module = nn.TransformerEncoder(encoder_layer, num_layers=2)
+                self.ts_pool = nn.AdaptiveAvgPool1d(1)
+            else:
+                raise ValueError(f"Unsupported ts_model: {ts_model}")
+
+        # -------- Classifier --------
         self.combined_dim = self.vision_output_dim + self.ts_hidden_dim
         
         # Ensure FC layers have consistent dimensions
@@ -125,8 +154,22 @@ class MultiModalNet(nn.Module):
             if timeseries is None:
                 ts_feat = torch.zeros(batch_size, self.ts_hidden_dim, device=device)
             else:
-                _, ts_feat = self.rnn(timeseries)
-                ts_feat = ts_feat.squeeze(0)
+                if self.ts_model == 'gru':
+                    _, ts_feat = self.ts_module(timeseries)
+                    ts_feat = ts_feat.squeeze(0)
+
+                elif self.ts_model == 'lstm':
+                    _, (ts_feat, _) = self.ts_module(timeseries)
+                    ts_feat = ts_feat.squeeze(0)
+
+                elif self.ts_model == 'cnn':
+                    x = timeseries.transpose(1, 2)  # (B, C, T)
+                    ts_feat = self.ts_module(x).squeeze(2)
+
+                elif self.ts_model == 'transformer':
+                    encoded = self.ts_module(timeseries)  # (B, T, C)
+                    pooled = self.ts_pool(encoded.transpose(1, 2))  # (B, C, 1)
+                    ts_feat = pooled.squeeze(2)
         else:
             ts_feat = torch.tensor([], device=device)
             
