@@ -76,15 +76,16 @@ def get_model(model_name: str, is_lora: bool, is_timm: bool, modality: str = "bo
 
 class MultiModalNet(nn.Module):
     def __init__(
-        self, num_classes, ts_input_dim=5, ts_model='cnn', has_vision=True, has_timeseries=True
+        self, num_classes, ts_input_dim=5, ts_model='transformer', has_vision=True, has_timeseries=True
     ):
         super().__init__()
         self.has_vision = has_vision
         self.has_timeseries = has_timeseries
         self.ts_model = ts_model.lower()
         self.ts_input_dim = ts_input_dim
-        
-        self.vision_output_dim = 1280 if has_vision else 0 # Mobilenet: 1024, EfficientNet: 1280
+
+        # Vision encoder
+        self.vision_output_dim = 1280 if has_vision else 0  # EfficientNet-B0 output
         if has_vision:
             self.vision_model = timm.create_model(
                 "efficientnet_b0", pretrained=True, num_classes=0
@@ -94,42 +95,66 @@ class MultiModalNet(nn.Module):
         self.ts_hidden_dim = 0
         if has_timeseries:
             if self.ts_model == 'gru':
-                self.ts_hidden_dim = 128
+                self.ts_hidden_dim = 256
                 self.ts_module = nn.GRU(
                     input_size=ts_input_dim,
                     hidden_size=self.ts_hidden_dim,
                     batch_first=True
                 )
+
             elif self.ts_model == 'lstm':
-                self.ts_hidden_dim = 128
+                self.ts_hidden_dim = 256
                 self.ts_module = nn.LSTM(
                     input_size=ts_input_dim,
                     hidden_size=self.ts_hidden_dim,
                     batch_first=True
                 )
+            
+            elif self.ts_model == 'rnn':
+                self.ts_hidden_dim = 256
+                self.ts_module = nn.RNN(
+                    input_size=ts_input_dim,
+                    hidden_size=self.ts_hidden_dim,
+                    batch_first=True
+                )
+
             elif self.ts_model == 'cnn':
-                self.ts_hidden_dim = 128
+                self.ts_hidden_dim = 256
                 self.ts_module = nn.Sequential(
-                    nn.Conv1d(ts_input_dim, 64, kernel_size=3, padding=1),
+                    nn.Conv1d(ts_input_dim, 256, kernel_size=3, padding=1),
                     nn.ReLU(),
-                    nn.Conv1d(64, self.ts_hidden_dim, kernel_size=3, padding=1),
+                    nn.Conv1d(256, self.ts_hidden_dim, kernel_size=3, padding=1),
                     nn.ReLU(),
-                    nn.AdaptiveAvgPool1d(1),  # Output shape: (B, H, 1)
+                    nn.AdaptiveAvgPool1d(1),
                 )
+
             elif self.ts_model == 'transformer':
-                self.ts_hidden_dim = ts_input_dim  # Keep same dim for attention
+                self.ts_embedding_dim = 128
+                self.ts_proj = nn.Linear(ts_input_dim, self.ts_embedding_dim)
+
                 encoder_layer = nn.TransformerEncoderLayer(
-                    d_model=ts_input_dim, nhead=1, dim_feedforward=128, batch_first=True
+                    d_model=self.ts_embedding_dim,
+                    nhead=4,
+                    dim_feedforward=128,
+                    dropout=0.1,
+                    batch_first=True,
+                    norm_first=True
                 )
-                self.ts_module = nn.TransformerEncoder(encoder_layer, num_layers=2)
-                self.ts_pool = nn.AdaptiveAvgPool1d(1)
+                self.ts_module = nn.TransformerEncoder(encoder_layer, num_layers=4)
+
+                # Attention-based pooling
+                self.ts_pool = nn.Sequential(
+                    nn.Linear(self.ts_embedding_dim, 64),
+                    nn.Tanh(),
+                    nn.Linear(64, 1)
+                )
+                self.ts_hidden_dim = self.ts_embedding_dim
+
             else:
                 raise ValueError(f"Unsupported ts_model: {ts_model}")
 
         # -------- Classifier --------
         self.combined_dim = self.vision_output_dim + self.ts_hidden_dim
-        
-        # Ensure FC layers have consistent dimensions
         self.fc = nn.Sequential(
             nn.Linear(self.combined_dim, 256),
             nn.ReLU(),
@@ -139,8 +164,8 @@ class MultiModalNet(nn.Module):
     def forward(self, images=None, timeseries=None):
         batch_size = images.shape[0] if images is not None else timeseries.shape[0]
         device = next(self.parameters()).device
-        
-        # Handle vision features
+
+        # Vision branch
         if self.has_vision:
             if images is None:
                 img_feat = torch.zeros(batch_size, self.vision_output_dim, device=device)
@@ -148,8 +173,8 @@ class MultiModalNet(nn.Module):
                 img_feat = self.vision_model(images)
         else:
             img_feat = torch.tensor([], device=device)
-            
-        # Handle timeseries features
+
+        # Time-series branch
         if self.has_timeseries:
             if timeseries is None:
                 ts_feat = torch.zeros(batch_size, self.ts_hidden_dim, device=device)
@@ -162,24 +187,30 @@ class MultiModalNet(nn.Module):
                     _, (ts_feat, _) = self.ts_module(timeseries)
                     ts_feat = ts_feat.squeeze(0)
 
+                elif self.ts_model == 'rnn':
+                    _, ts_feat = self.ts_module(timeseries)  # Get last hidden state
+                    ts_feat = ts_feat.squeeze(0)
+
+
                 elif self.ts_model == 'cnn':
                     x = timeseries.transpose(1, 2)  # (B, C, T)
                     ts_feat = self.ts_module(x).squeeze(2)
 
                 elif self.ts_model == 'transformer':
-                    encoded = self.ts_module(timeseries)  # (B, T, C)
-                    pooled = self.ts_pool(encoded.transpose(1, 2))  # (B, C, 1)
-                    ts_feat = pooled.squeeze(2)
+                    x = self.ts_proj(timeseries)                      # (B, T, 64)
+                    encoded = self.ts_module(x)                      # (B, T, 64)
+                    attn_weights = torch.softmax(self.ts_pool(encoded), dim=1)  # (B, T, 1)
+                    ts_feat = torch.sum(attn_weights * encoded, dim=1)          # (B, 64)
         else:
             ts_feat = torch.tensor([], device=device)
-            
-        # Combine available features
+
+        # Combine
         features = []
         if self.has_vision:
             features.append(img_feat)
         if self.has_timeseries:
             features.append(ts_feat)
-            
+
         combined = torch.cat(features, dim=1)
         return self.fc(combined)
 
