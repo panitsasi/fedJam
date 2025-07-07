@@ -85,10 +85,10 @@ class MultiModalNet(nn.Module):
         self.ts_input_dim = ts_input_dim
 
         # Vision encoder
-        self.vision_output_dim = 1280 if has_vision else 0  # EfficientNet-B0 output
+        self.vision_output_dim = 1024 if has_vision else 0  # EfficientNet-B0 output is 1280
         if has_vision:
             self.vision_model = timm.create_model(
-                "efficientnet_b0", pretrained=True, num_classes=0
+                "mobilenetv3_small_100.lamb_in1k", pretrained=True, num_classes=0
             )
 
         # -------- Timeseries Module --------
