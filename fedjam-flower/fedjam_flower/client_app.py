@@ -16,6 +16,17 @@ from torch import nn
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",  # Includes timestamps
+    handlers=[
+        logging.StreamHandler(),  # Prints to console
+        logging.FileHandler("flower.log"),  # Optionally save to file
+    ]
+)
+
 
 # Define Flower Client and client_fn
 class FlowerClient(NumPyClient):
@@ -58,7 +69,7 @@ class FlowerClient(NumPyClient):
                 for param in self.model.parameters():
                     param.requires_grad = True
 
-        print(f"Training...", flush=True)
+        logging.info(f"Training starts for round {current_round}")
         train_loss = train(
             self.model,
             self.trainloader,
@@ -69,6 +80,8 @@ class FlowerClient(NumPyClient):
             is_timm=self.is_timm,
             is_multimodal=self.is_multimodal,
         )
+        logging.info(f"Training completed for round {current_round} with loss: {train_loss}")
+
         return (
             get_weights(self.model, is_lora=self.is_lora),
             len(self.trainloader.dataset),
@@ -85,11 +98,29 @@ class FlowerClient(NumPyClient):
 def client_fn(context: Context):
     # Load model and data
     model_name = context.run_config["model_name"]
-    modality = context.run_config.get("modality", "both")  # Default to both if not specified
-    model = get_model(model_name, context.run_config["is_lora"], 
-                     context.run_config["is_timm"], modality=modality)
     partition_id = context.node_config["partition-id"]
-    num_partitions = context.node_config["num-partitions"]
+    split_modality_by_client = context.run_config.get("split_modality_by_client", False)
+    
+    # Assign modality based on configuration
+    if split_modality_by_client:
+        # Assign modality based on partition ID: even = image, odd = timeseries
+        if partition_id % 2 == 0:
+            modality = "image"
+            print(f"Client {partition_id}: Using IMAGE modality (split experiment enabled)")
+        else:
+            modality = "timeseries"
+            print(f"Client {partition_id}: Using TIMESERIES modality (split experiment enabled)")
+        model = get_model(model_name, context.run_config["is_lora"], 
+                        context.run_config["is_timm"], modality='both')
+        num_partitions = 10 # for split_modality_by_client experiment
+    else:
+        # Use the default modality from configuration
+        modality = context.run_config.get("modality", "both")
+        print(f"Client {partition_id}: Using {modality.upper()} modality (default configuration)")
+        model = get_model(model_name, context.run_config["is_lora"],
+                          context.run_config["is_timm"], modality=modality)
+        num_partitions = context.node_config["num-partitions"]
+
     data_dir = context.node_config.get("data_dir") or context.run_config["data_dir"]
     batch_size = context.run_config["batch_size"]
     classes_per_partition = context.run_config["classes_per_partition"]

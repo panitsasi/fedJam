@@ -21,6 +21,17 @@ import json
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",  # Includes timestamps
+    handlers=[
+        logging.StreamHandler(),  # Prints to console
+        logging.FileHandler("flower.log"),  # Optionally save to file
+    ]
+)
+
 
 def get_evaluate_fn(context: Context):
     model_name = context.run_config["model_name"]
