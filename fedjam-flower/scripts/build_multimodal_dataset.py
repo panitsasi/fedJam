@@ -57,13 +57,13 @@ from PIL import Image as PILImage
 from tqdm import tqdm
 
 # === Dataset Configuration ===
-MAX_LEN = 512                      # Max sequence length after downsampling (256, )
-DOWNSAMPLE_FACTOR = 50             # Reduces ~18000 rows → ~240 (e.g., 50, 75)
+MAX_LEN = 256                      # Max sequence length after downsampling (256, )
+DOWNSAMPLE_FACTOR = 75             # Reduces ~18000 rows → ~240 (e.g., 50, 75)
 KPI_COLUMNS = None                 # e.g. ["SNR", "Latency"] or None to use all
 CHUNK_SIZE = 5000                  # For Arrow memory safety
 
 # === Output directory (dynamically named) ===
-OUTPUT_DIR_ROOT = "/home/iofeidis/workspace/hf_dataset"
+OUTPUT_DIR_ROOT = "/home/iofeidis/workspace/hf_dataset_gain_30"
 
 # === Global feature count placeholder (set dynamically) ===
 NUM_FEATURES = None
@@ -135,7 +135,7 @@ def chunk_list(data, chunk_size):
 
 
 # === Load raw data ===
-base_path = Path("/home/ioannis/Desktop/spectrograms/spectro_flower_multimodal")
+base_path = Path("/home/ioannis/Desktop/spectrograms/spectro_flower_multimodal_gain_30")
 train_data = load_split(base_path / "train")
 test_data = load_split(base_path / "test")
 
@@ -178,7 +178,7 @@ dataset = DatasetDict({
 print("\n💾 Saving to disk...")
 # === Build dynamic output folder name
 col_tag = "all" if KPI_COLUMNS is None else "-".join([c[:3].lower() for c in KPI_COLUMNS])
-output_name = f"hf_dataset.down{DOWNSAMPLE_FACTOR}.len{MAX_LEN}.cols_{col_tag}"
+output_name = f"hf_dataset_gain_30.down{DOWNSAMPLE_FACTOR}.len{MAX_LEN}.cols_{col_tag}"
 output_path = Path(OUTPUT_DIR_ROOT).parent / output_name
 
 print(f"\n💾 Saving to disk at: {output_path}")
