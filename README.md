@@ -22,7 +22,7 @@ FedJam is:
 
 ### 🛠️ Fig. 2: System Architecture
 <p align="center">
-  <img src="figures/architecture.png" alt="System Architecture" width="250"/>
+  <img src="figures/architecture.png" alt="System Architecture" width="300"/>
 </p>
 
 ---
