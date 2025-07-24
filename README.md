@@ -19,7 +19,9 @@ FedJam is:
 - 🛡️ **Robust**: Maintains performance under heterogeneous data distributions.
 
 ### 🛠️ Fig. 2: System Architecture
-<img src="figures/architecture.png" alt="System Architecture" width="300"/>
+<p align="center">
+  <img src="figures/architecture.png" alt="System Architecture" width="300"/>
+</p>
 
 ---
 
