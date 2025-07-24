@@ -8,7 +8,9 @@
 You can find a visual summary of what FedJam introduces in **Figure 1** (below), and a detailed view of the system architecture in **Figure 2**.
 
 ### 🧭 Fig. 1: FedJam Overview
-<img src="figures/overview.png" alt="FedJam Overview" width="400"/>
+<p align="center">
+  <img src="figures/overview.png" alt="FedJam Overview" width="400"/>
+</p>
 
 FedJam is:
 
