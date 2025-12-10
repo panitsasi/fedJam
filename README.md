@@ -99,10 +99,10 @@ The full dataset will be publicly released upon publication of the paper.
 
 If you use FedJam, its architecture, or the dataset in your research, please cite:
 
-I. Panitsas, I. Ofeidis, and L. Tassiulas,
+```I. Panitsas, I. Ofeidis, and L. Tassiulas,
 “FedJam: Multimodal Federated Learning Framework for Jamming Detection,”
 arXiv:2508.09369 [cs.NI], 2025. doi:10.48550/arXiv.2508.09369.
-
+```
 
 ---
 
