@@ -31,7 +31,7 @@ learning-rate-max = 5e-4
 learning-rate-min = 1e-6
 batch_size = 128
 dataset_version = "multimodal"
-data_dir = "/home/username/fedJam/data/sample_dataset"
+data_dir = "panitsasi/FedJam"
 fft = 0
 gain = 0
 num_clients = 5
@@ -40,14 +40,14 @@ is_timm = false
 is_warmup = false
 random_seed = 42
 classes_per_partition = 4 # IID: 4, Non-IID: < 4
-modality = "image"  # Options: "both", "image", or "timeseries"
+modality = "both"  # Options: "both", "image", or "timeseries"
 split_modality_by_client = false
 
 [tool.flwr.federations]
 default = "local-simulation"
 
 [tool.flwr.federations.local-simulation]
-options.num-supernodes = 5
+options.num-supernodes = 2
 options.backend.client-resources.num-cpus = 8
 options.backend.client-resources.num-gpus = 0.2
 

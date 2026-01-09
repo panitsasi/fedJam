@@ -39,7 +39,7 @@ def load_data(partition_id: int, num_partitions: int, data_dir: str = None,
     global dataset_dict
     if dataset_dict is None:
         if is_multimodal:
-            dataset_dict = load_from_disk(data_dir)
+            dataset_dict = load_dataset(data_dir)
 
             # Encode string labels to integers
             labels = sorted(set(dataset_dict["train"]["label"]))
