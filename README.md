@@ -89,11 +89,14 @@ A small subset of the full dataset is provided under the `data/` directory for q
 * Corresponding `.csv` files for KPI measurements
 * Labels for benign and three jamming attack types
 
-The full dataset will be publicly released upon publication of the paper.
+---
+
+## 📊 Full Dataset
+
+The full dataset is publicly available on Hugging Face at:  https://huggingface.co/datasets/panitsasi/FedJam
 
 ---
 
----
 
 ## Cite
 
